@@ -2,9 +2,8 @@
   "name": "ai-node-1",
   "version": "1.0.0",
   "main": "index.js",
-  "type": "module",
   "scripts": {
-    "start": "node --env-file=.env src/index.js",
+    "start": "node -r ts-node/register  --env-file=.env src/index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
@@ -12,6 +11,12 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "openai": "^4.91.1"
+    "openai": "^4.91.1",
+    "tiktoken": "^1.0.20"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2"
   }
 }
