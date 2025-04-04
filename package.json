@@ -1,22 +1,36 @@
 {
   "name": "ai-node-1",
   "version": "1.0.0",
+  "description": "AI Chat application with conversation memory",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "start": "node -r ts-node/register  --env-file=.env src/index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev:frontend": "vite",
+    "dev:backend": "tsx --env-file=server/.env server/src/index.ts",
+    "dev": "concurrently \"npm run dev:frontend\" \"npm run dev:backend\"",
+    "build": "vue-tsc && vite build",
+    "preview": "vite preview"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
-    "openai": "^4.91.1",
-    "tiktoken": "^1.0.20"
+    "@supabase/supabase-js": "^2.39.8",
+    "cors": "^2.8.5",
+    "express": "^4.18.3",
+    "openai": "^4.28.4",
+    "vue": "^3.4.21"
   },
   "devDependencies": {
-    "@types/node": "^22.14.0",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.28",
+    "@vitejs/plugin-vue": "^5.0.4",
+    "concurrently": "^8.2.2",
     "ts-node": "^10.9.2",
-    "typescript": "^5.8.2"
+    "tsx": "^4.19.3",
+    "typescript": "^5.4.2",
+    "vite": "^5.1.6",
+    "vue-tsc": "^2.0.6"
   }
 }
