@@ -4,14 +4,37 @@
 *::after {
   box-sizing: border-box;
   margin: 0;
-  font-weight: normal;
+  padding: 0;
+}
+
+:root {
+  /* Light theme */
+  --bg-main: #f8fafc;
+  --bg-white: #ffffff;
+  --bg-sidebar: #f1f5f9;
+  --bg-message-user: #0ea5e9;
+  --bg-message-assistant: #f8fafc;
+  --bg-message-system: #64748b;
+  --text-primary: #0f172a;
+  --text-secondary: #1e293b;
+  --text-muted: #475569;
+  --text-on-primary: #ffffff;
+  --border-color: #e2e8f0;
+  --shadow-color: rgba(51, 65, 85, 0.08);
+  --input-bg: #ffffff;
+  --input-border: #cbd5e1;
+  --tag-bg: #e2e8f0;
+  --tag-text: #1e293b;
+  --tag-bg-selected: #0ea5e9;
+  --tag-text-selected: #ffffff;
+  --primary: #0ea5e9;
+  --primary-dark: #0284c7;
 }
 
 body {
   min-height: 100vh;
-  color: #213547;
-  background: #ffffff;
-  transition: color 0.5s, background-color 0.5s;
+  color: var(--text-primary);
+  background: var(--bg-main);
   line-height: 1.6;
   font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
     Oxygen, Ubuntu, Cantarell, 'Fira Sans', 'Droid Sans', 'Helvetica Neue',

@@ -27,9 +27,10 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 export type MessageRole = 'system' | 'user' | 'assistant';
 
 /** Structure of a chat message */
-interface Message {
+export interface Message {
   role: MessageRole;
   content: string;
+  created_at?: string;
 }
 
 interface ConversationContext {
@@ -37,6 +38,11 @@ interface ConversationContext {
   keyTerms: string[];
   tags: string[];
   raw_conversation?: string;
+}
+
+export interface ApiError extends Error {
+  status?: number;
+  details?: any;
 }
 
 export class ConversationManager {
@@ -49,9 +55,23 @@ export class ConversationManager {
   private conversationId: string | null = null;
   private summarizationService: SummarizationService;
   private systemMessage = 'You are a helpful AI assistant.';
+  private loading = ref(false);
+  private error = ref<ApiError | null>(null);
 
   constructor() {
     this.summarizationService = new SummarizationService();
+  }
+
+  private setError(message: string, status?: number, details?: any) {
+    const error = new Error(message) as ApiError;
+    error.status = status;
+    error.details = details;
+    this.error.value = error;
+    console.error('ConversationManager error:', error);
+  }
+
+  private clearError() {
+    this.error.value = null;
   }
 
   /**
@@ -59,15 +79,20 @@ export class ConversationManager {
    * Called automatically on initialization
    */
   private async createNewConversation(): Promise<string> {
-    const { data, error } = await supabase
-      .from('conversations')
-      .insert({})
-      .select()
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('conversations')
+        .insert({})
+        .select()
+        .single();
 
-    if (error) throw error;
-    this.conversationId = data.id;
-    return data.id;
+      if (error) throw error;
+      this.conversationId = data.id;
+      return data.id;
+    } catch (error) {
+      this.setError('Failed to create conversation', 500, error);
+      throw error;
+    }
   }
 
   /**
@@ -124,21 +149,26 @@ export class ConversationManager {
    * @returns The AI's response text
    */
   async sendMessage(content: string): Promise<void> {
-    if (!this.conversationId) {
-      await this.createNewConversation();
-    }
-
-    // Add user message
-    const userMessage: Message = { role: 'user', content };
-    this.messages.value.push(userMessage);
+    this.clearError();
+    this.loading.value = true;
 
     try {
+      if (!this.conversationId) {
+        await this.createNewConversation();
+      }
+
+      // Add user message
+      const userMessage: Message = { role: 'user', content };
+      this.messages.value.push(userMessage);
+
       // Save user message
-      await supabase.from('messages').insert({
+      const { error: msgError } = await supabase.from('messages').insert({
         conversation_id: this.conversationId,
         role: 'user',
         content
       });
+
+      if (msgError) throw msgError;
 
       // Get AI response
       const response = await fetch('/api/chat', {
@@ -153,36 +183,33 @@ export class ConversationManager {
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get AI response');
+        throw new Error(`API error: ${response.status}`);
       }
 
-      const { message: assistantMessage } = await response.json();
-
-      // Add assistant message to local state
-      const assistantMessageObj: Message = {
+      const data = await response.json();
+      const assistantMessage: Message = {
         role: 'assistant',
-        content: assistantMessage
+        content: data.message
       };
-      this.messages.value.push(assistantMessageObj);
 
-      // Save AI message to Supabase
-      const { error: aiMsgError } = await supabase.from('messages').insert([
-        {
-          conversation_id: this.conversationId,
-          role: assistantMessageObj.role,
-          content: assistantMessageObj.content
-        }
-      ]);
+      this.messages.value.push(assistantMessage);
 
-      if (aiMsgError) {
-        console.error('Error saving AI message:', aiMsgError);
-      }
+      // Save assistant message
+      const { error: aiMsgError } = await supabase.from('messages').insert({
+        conversation_id: this.conversationId,
+        role: 'assistant',
+        content: data.message
+      });
+
+      if (aiMsgError) throw aiMsgError;
 
       // Update context after new messages
       await this.updateContext();
     } catch (error) {
-      console.error('Error in sendMessage:', error);
+      this.setError('Failed to send message', 500, error);
       throw error;
+    } finally {
+      this.loading.value = false;
     }
   }
 
@@ -199,6 +226,7 @@ export class ConversationManager {
   }
 
   async searchByTags(tags: string[]): Promise<any[]> {
+    this.clearError();
     try {
       const { data, error } = await supabase.rpc(
         'search_conversations_by_tags',
@@ -208,12 +236,13 @@ export class ConversationManager {
       if (error) throw error;
       return data || [];
     } catch (error) {
-      console.error('Error searching by tags:', error);
+      this.setError('Failed to search by tags', 500, error);
       return [];
     }
   }
 
   async injectContext(conversationId: string): Promise<void> {
+    this.clearError();
     try {
       // Get the context of the selected conversation
       const { data: contextData, error: contextError } = await supabase
@@ -232,7 +261,16 @@ export class ConversationManager {
         });
       }
     } catch (error) {
-      console.error('Error injecting context:', error);
+      this.setError('Failed to inject context', 500, error);
+      throw error;
     }
+  }
+
+  isLoading(): boolean {
+    return this.loading.value;
+  }
+
+  getError(): ApiError | null {
+    return this.error.value;
   }
 }

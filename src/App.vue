@@ -13,28 +13,40 @@
 
 <script setup lang="ts">
 import { ref, onMounted, nextTick, computed } from 'vue';
-import { ConversationManager } from './lib/ConversationManager';
+import {
+  ConversationManager,
+  type Message,
+  type ApiError
+} from './lib/ConversationManager';
+import { supabase } from './lib/supabase';
+import { useDark, useToggle } from '@vueuse/core';
+
+interface RelatedConversation {
+  conversation_id: string;
+  summary: string;
+  tags: string[];
+  created_at: string;
+  raw_conversation: string;
+}
 
 const messagesContainer = ref<HTMLElement | null>(null);
 const messageInput = ref<HTMLInputElement | null>(null);
 const newMessage = ref('');
-const isLoading = ref(false);
+const isLoading = computed(() => conversationManager.isLoading());
 const sidebarOpen = ref(true);
 const conversationManager = new ConversationManager();
 const selectedTags = ref<string[]>([]);
-const relatedConversations = ref<any[]>([]);
+const relatedConversations = ref<RelatedConversation[]>([]);
 const showRawConversation = ref<string | null>(null);
-
-interface Message {
-  role: string;
-  content: string;
-}
+const error = computed(() => conversationManager.getError());
 
 const messages = computed(() => conversationManager.getCurrentMessages());
 const context = computed(() => conversationManager.getContext());
 
+const isDark = useDark();
+const toggleDark = useToggle(isDark);
+
 const scrollToBottom = async () => {
-  // Wait for the next tick to ensure the DOM is updated
   await nextTick();
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
@@ -46,29 +58,65 @@ const toggleSidebar = () => {
 };
 
 const sendMessage = async () => {
-  if (!newMessage.value.trim()) return;
+  if (!newMessage.value.trim() || isLoading.value) return;
 
-  const userMessage = newMessage.value;
+  const messageToSend = newMessage.value;
   newMessage.value = '';
 
   try {
-    await conversationManager.sendMessage(userMessage);
+    await conversationManager.sendMessage(messageToSend);
     await scrollToBottom();
-    messageInput.value?.focus();
-  } catch (error) {
-    console.error('Error sending message:', error);
-    // You could add error handling UI here
+  } catch (err) {
+    console.error('Failed to send message:', err);
   }
 };
 
 const filterByTags = async (tags: string[]) => {
   selectedTags.value = tags;
-  // We'll implement this in ConversationManager
-  relatedConversations.value = await conversationManager.searchByTags(tags);
+  relatedConversations.value = (await conversationManager.searchByTags(
+    tags
+  )) as RelatedConversation[];
 };
 
 const addConversationContext = async (conversationId: string) => {
   await conversationManager.injectContext(conversationId);
+  await scrollToBottom();
+};
+
+const addSampleData = async () => {
+  try {
+    const response = await fetch('/api/sample-data', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to add sample data');
+    }
+
+    // Get all unique tags from the context
+    const { data: contextData, error: contextError } = await supabase
+      .from('conversation_contexts')
+      .select('tags');
+
+    if (contextError) throw contextError;
+
+    // Extract unique tags
+    const allTags = new Set<string>();
+    contextData?.forEach((ctx: { tags?: string[] }) => {
+      ctx.tags?.forEach((tag: string) => allTags.add(tag));
+    });
+
+    // Update selected tags and search
+    if (allTags.size > 0) {
+      selectedTags.value = Array.from(allTags).slice(0, 3); // Select first 3 tags
+      relatedConversations.value = (await conversationManager.searchByTags(
+        selectedTags.value
+      )) as RelatedConversation[];
+    }
+  } catch (err) {
+    console.error('Error adding sample data:', err);
+  }
 };
 
 onMounted(() => {
@@ -77,7 +125,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="app-container">
+  <div class="app-container" :class="{ dark: isDark }">
     <!-- Header -->
     <header class="header">
       <button class="menu-button" @click="toggleSidebar">
@@ -99,6 +147,9 @@ onMounted(() => {
       </button>
       <h1 class="header-title">AI Chat</h1>
       <div class="header-actions">
+        <button class="theme-toggle" @click="toggleDark()">
+          {{ isDark ? '🌙' : '☀️' }}
+        </button>
         <button class="action-button">
           <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -171,7 +222,7 @@ onMounted(() => {
               >
                 <div
                   v-for="conv in relatedConversations"
-                  :key="conv.id"
+                  :key="conv.conversation_id"
                   class="related-conversation"
                 >
                   <div class="conversation-header">
@@ -214,34 +265,59 @@ onMounted(() => {
             </div>
           </section>
         </div>
+
+        <!-- Add sample data button -->
+        <button class="sample-data-button" @click="addSampleData">
+          Add Sample Data
+        </button>
       </aside>
 
       <!-- Main chat area -->
       <main class="chat-area" :class="{ 'sidebar-open': sidebarOpen }">
         <div class="chat-container">
-          <!-- Message display area with auto-scroll -->
+          <!-- Error display -->
+          <div v-if="error" class="error-message">
+            <p>{{ error.message }}</p>
+            <button @click="error = null" class="close-error">×</button>
+          </div>
+
+          <!-- Messages -->
           <div class="messages" ref="messagesContainer">
             <div
               v-for="(message, index) in messages"
               :key="index"
-              class="message-wrapper"
+              class="message"
+              :class="message.role"
             >
-              <div :class="['message', message.role]">
-                <div class="message-content">{{ message.content }}</div>
+              {{ message.content }}
+            </div>
+
+            <!-- Loading indicator -->
+            <div v-if="isLoading" class="message assistant loading">
+              <div class="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
               </div>
             </div>
           </div>
 
-          <!-- Message input form -->
+          <!-- Input area -->
           <div class="input-container">
             <input
-              ref="messageInput"
               v-model="newMessage"
-              @keyup.enter="sendMessage"
-              placeholder="Type your message..."
               class="message-input"
+              placeholder="Type your message..."
+              @keyup.enter="sendMessage"
+              :disabled="isLoading"
             />
-            <button @click="sendMessage" class="send-button">Send</button>
+            <button
+              class="send-button"
+              @click="sendMessage"
+              :disabled="!newMessage.trim() || isLoading"
+            >
+              {{ isLoading ? 'Sending...' : 'Send' }}
+            </button>
           </div>
         </div>
       </main>
@@ -266,44 +342,69 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* Component-specific styles */
 .app-container {
-  height: 100vh;
+  position: fixed;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  background: #f9fafb;
+  background: var(--bg-main);
+  color: var(--text-primary);
 }
 
+.app-container.dark {
+  --bg-main: #1a1b1e;
+  --bg-white: #2c2e33;
+  --bg-sidebar: #25262b;
+  --bg-message-user: #3b82f6;
+  --bg-message-assistant: #2c2e33;
+  --bg-message-system: #4b5563;
+  --text-primary: #e5e7eb;
+  --text-secondary: #d1d5db;
+  --text-muted: #9ca3af;
+  --text-on-primary: #ffffff;
+  --border-color: #374151;
+  --shadow-color: rgba(0, 0, 0, 0.2);
+  --input-bg: #1f2937;
+  --input-border: #4b5563;
+  --tag-bg: #374151;
+  --tag-text: #d1d5db;
+  --tag-bg-selected: #3b82f6;
+  --tag-text-selected: #ffffff;
+  --primary: #3b82f6;
+  --primary-dark: #2563eb;
+}
+
+/* Header */
 .header {
   height: 60px;
-  background: white;
-  border-bottom: 1px solid #e5e7eb;
   display: flex;
   align-items: center;
   padding: 0 1.5rem;
-  position: relative;
-  z-index: 20;
+  background: var(--bg-white);
+  border-bottom: 1px solid var(--border-color);
+  gap: 1rem;
 }
 
 .menu-button {
   background: none;
   border: none;
-  color: #6b7280;
-  cursor: pointer;
+  color: var(--text-muted);
   padding: 0.5rem;
-  margin-right: 1rem;
   border-radius: 0.375rem;
-  transition: all 0.2s;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
 .menu-button:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--bg-main);
+  color: var(--text-primary);
 }
 
 .header-title {
+  color: var(--text-primary);
   font-size: 1.25rem;
   font-weight: 600;
-  color: #111827;
   margin: 0;
 }
 
@@ -311,80 +412,50 @@ onMounted(() => {
   margin-left: auto;
 }
 
-.action-button {
-  background: none;
-  border: none;
-  color: #6b7280;
-  cursor: pointer;
-  padding: 0.5rem;
-  border-radius: 0.375rem;
-  transition: all 0.2s;
-}
-
-.action-button:hover {
-  background: #f3f4f6;
-  color: #374151;
-}
-
+/* Main content */
 .main-container {
   flex: 1;
   display: flex;
-  overflow: hidden;
+  min-height: 0;
+  position: relative;
 }
 
+/* Sidebar */
 .sidebar {
   width: 300px;
-  background: white;
-  border-right: 1px solid #e5e7eb;
   display: flex;
   flex-direction: column;
-  transition: transform 0.3s ease;
-  position: relative;
-  z-index: 10;
+  background: var(--bg-white);
+  border-right: 1px solid var(--border-color);
+  height: calc(100vh - 60px);
 }
 
 .sidebar-header {
-  padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .sidebar-header h2 {
-  margin: 0;
-  font-size: 1rem;
+  color: var(--text-primary);
+  font-size: 1.125rem;
   font-weight: 600;
-  color: #374151;
+  margin: 0;
 }
 
 .memory-sections {
   flex: 1;
   overflow-y: auto;
-  padding: 1rem;
+  padding: 1.25rem;
 }
 
-.memory-section {
-  margin-bottom: 2rem;
-}
-
-.memory-section h3 {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #6b7280;
-  margin: 0 0 0.75rem;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.memory-items {
-  font-size: 0.875rem;
-  color: #374151;
-}
-
+/* Chat area */
 .chat-area {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-width: 0;
-  transition: margin-left 0.3s ease;
+  height: calc(100vh - 60px);
+  overflow: hidden;
 }
 
 .chat-container {
@@ -394,79 +465,93 @@ onMounted(() => {
   max-width: 900px;
   margin: 0 auto;
   width: 100%;
-  padding: 2rem;
-  height: calc(100vh - 60px);
+  padding: 1.5rem;
+  height: 100%;
+  overflow: hidden;
 }
 
+/* Messages */
 .messages {
   flex: 1;
   overflow-y: auto;
-  margin-bottom: 2rem;
-  padding: 0 1rem;
-  scroll-behavior: smooth;
-}
-
-.message-wrapper {
-  margin: 1rem 0;
-  clear: both;
+  padding: 1rem 0;
+  margin-bottom: 1rem;
 }
 
 .message {
   display: inline-block;
   max-width: 85%;
   padding: 0.75rem 1rem;
+  margin: 0.5rem 0;
+  border-radius: 1rem;
+  clear: both;
   line-height: 1.5;
   font-size: 0.95rem;
-  border-radius: 1rem;
 }
 
 .message.user {
   float: right;
-  background: #2563eb;
-  color: white;
+  background: var(--primary);
+  color: var(--text-on-primary);
   border-bottom-right-radius: 0.25rem;
 }
 
 .message.assistant {
   float: left;
-  background: #7c3aed;
-  color: white;
+  background: var(--bg-white);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
   border-bottom-left-radius: 0.25rem;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
-.message-content {
-  white-space: pre-wrap;
-  word-wrap: break-word;
+.message.system {
+  float: left;
+  background: var(--bg-message-system);
+  color: var(--text-on-primary);
+  border-radius: 0.5rem;
+  font-style: italic;
+  font-size: 0.875rem;
+  max-width: 100%;
+  margin: 1rem 0;
 }
 
+/* Input area */
 .input-container {
+  padding: 1rem 1.5rem;
+  background: var(--bg-white);
+  border-radius: 1rem;
   display: flex;
   gap: 0.75rem;
-  padding: 1rem 0 2rem;
   margin-top: auto;
-  background: linear-gradient(180deg, rgba(249, 250, 251, 0) 0%, #f9fafb 20%);
+  box-shadow: 0 2px 4px var(--shadow-color);
 }
 
 .message-input {
   flex: 1;
   padding: 0.75rem 1rem;
-  border: 1px solid #e5e7eb;
-  border-radius: 1rem;
+  border: 1px solid var(--input-border);
+  border-radius: 0.75rem;
   font-size: 0.95rem;
-  color: #1f2937;
-  outline: none;
+  color: var(--text-primary);
+  background: var(--input-bg);
+  transition: all 0.2s ease;
 }
 
 .message-input:focus {
-  border-color: #2563eb;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.message-input:disabled {
+  background: var(--bg-main);
+  cursor: not-allowed;
 }
 
 .send-button {
   padding: 0.75rem 1.5rem;
-  background: #2563eb;
-  color: white;
+  background: var(--primary);
+  color: var(--text-on-primary);
   border: none;
   border-radius: 0.75rem;
   font-weight: 500;
@@ -474,43 +559,145 @@ onMounted(() => {
   transition: all 0.2s ease;
 }
 
-.send-button:hover {
-  background: #3b82f6;
+.send-button:hover:not(:disabled) {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
 }
 
-/* Custom scrollbar */
-.messages::-webkit-scrollbar {
-  width: 6px;
+.send-button:disabled {
+  background: var(--bg-message-system);
+  cursor: not-allowed;
 }
 
-.messages::-webkit-scrollbar-track {
-  background: transparent;
+/* Sample data button */
+.sample-data-button {
+  margin: 1.25rem;
+  padding: 0.75rem 1rem;
+  background: var(--primary);
+  color: var(--text-on-primary);
+  border: none;
+  border-radius: 0.5rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.messages::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
+.sample-data-button:hover {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
 }
 
-.messages::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+/* Tags and related content */
+.tag-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
 }
 
+.tag {
+  background: var(--tag-bg);
+  color: var(--tag-text);
+  padding: 0.375rem 0.75rem;
+  border-radius: 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tag:hover {
+  background: var(--primary);
+  color: var(--text-on-primary);
+}
+
+.tag.selected {
+  background: var(--tag-bg-selected);
+  color: var(--tag-text-selected);
+}
+
+/* Error message */
+.error-message {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  background: #fee2e2;
+  border: 1px solid #ef4444;
+  color: #b91c1c;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  z-index: 50;
+  max-width: 24rem;
+  box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+/* Loading indicator */
+.message.loading {
+  background: var(--bg-main);
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+  padding: 0.75rem 1rem;
+}
+
+.typing-indicator {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem;
+}
+
+.typing-indicator span {
+  width: 0.5rem;
+  height: 0.5rem;
+  background: var(--text-muted);
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+
+.typing-indicator span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+/* Responsive adjustments */
 @media (max-width: 768px) {
   .sidebar {
     position: absolute;
-    top: 60px;
-    bottom: 0;
     left: 0;
+    top: 0;
+    bottom: 0;
     transform: translateX(-100%);
+    transition: transform 0.3s ease;
+    z-index: 20;
   }
 
   .sidebar.sidebar-open {
     transform: translateX(0);
   }
 
-  .chat-area {
-    margin-left: 0 !important;
+  .chat-container {
+    padding: 1rem;
+  }
+
+  .input-container {
+    margin: 0 0.5rem 0.5rem;
   }
 }
 
@@ -595,13 +782,6 @@ onMounted(() => {
   gap: 1rem;
 }
 
-.related-conversation {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 0.5rem;
-  padding: 1rem;
-}
-
 .conversation-header {
   display: flex;
   justify-content: space-between;
@@ -623,12 +803,6 @@ onMounted(() => {
   border-radius: 0.375rem;
   font-size: 0.75rem;
   cursor: pointer;
-}
-
-.conversation-summary {
-  font-size: 0.875rem;
-  color: #374151;
-  margin: 0.5rem 0;
 }
 
 .conversation-tags {
@@ -707,6 +881,117 @@ onMounted(() => {
 
 .no-results {
   color: #6b7280;
+  font-size: 0.875rem;
+  font-style: italic;
+}
+
+.close-error {
+  background: none;
+  border: none;
+  color: #b91c1c;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.typing-indicator {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.5rem;
+}
+
+.typing-indicator span {
+  width: 0.5rem;
+  height: 0.5rem;
+  background: #6b7280;
+  border-radius: 50%;
+  animation: bounce 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.typing-indicator span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
+}
+
+.message.loading {
+  background: #f3f4f6;
+  min-height: 2.5rem;
+  display: flex;
+  align-items: center;
+}
+
+/* Header */
+.theme-toggle {
+  background: none;
+  border: none;
+  font-size: 1.25rem;
+  padding: 0.5rem;
+  cursor: pointer;
+  border-radius: 0.375rem;
+  transition: all 0.2s ease;
+}
+
+.theme-toggle:hover {
+  background: var(--bg-main);
+}
+
+/* Sidebar */
+.memory-section h3 {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 1rem;
+}
+
+.context-summary h4,
+.key-terms h4 {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0 0 0.5rem;
+}
+
+.context-summary p {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.conversation-header h4 {
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  margin: 0;
+}
+
+.conversation-summary {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  margin: 0.5rem 0;
+}
+
+.placeholder-text {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  font-style: italic;
+}
+
+.no-results {
+  color: var(--text-muted);
   font-size: 0.875rem;
   font-style: italic;
 }

@@ -15,6 +15,8 @@ body {
 
 #app {
   height: 100vh;
+  width: 100vw;
+  overflow: hidden;
 }
 
 /* Main styles */
@@ -94,4 +96,45 @@ body {
 .send-button:disabled {
   background: #bdbdbd;
   cursor: not-allowed;
+}
+
+/* App layout */
+#app {
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* Utility classes */
+.flex {
+  display: flex;
+}
+.flex-col {
+  flex-direction: column;
+}
+.items-center {
+  align-items: center;
+}
+.justify-between {
+  justify-content: space-between;
+}
+.gap-1 {
+  gap: 0.25rem;
+}
+.gap-2 {
+  gap: 0.5rem;
+}
+.gap-4 {
+  gap: 1rem;
+}
+
+/* Transitions */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
 }
