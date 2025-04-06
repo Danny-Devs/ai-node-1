@@ -10,6 +10,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { ref } from 'vue';
+import { SummarizationService } from './SummarizationService';
 
 // Environment variables are declared in src/env.d.ts
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
@@ -31,18 +32,26 @@ interface Message {
   content: string;
 }
 
+interface ConversationContext {
+  summary: string;
+  keyTerms: string[];
+  tags: string[];
+  raw_conversation?: string;
+}
+
 export class ConversationManager {
   private messages = ref<Message[]>([]);
-  private systemMessage: Message = {
-    role: 'system',
-    content:
-      'You are a helpful AI assistant. Be concise and clear in your responses.'
-  };
+  private context = ref<ConversationContext>({
+    summary: '',
+    keyTerms: [],
+    tags: []
+  });
   private conversationId: string | null = null;
+  private summarizationService: SummarizationService;
+  private systemMessage = 'You are a helpful AI assistant.';
 
   constructor() {
-    // Initialize with empty messages array
-    this.messages.value = [];
+    this.summarizationService = new SummarizationService();
   }
 
   /**
@@ -52,16 +61,60 @@ export class ConversationManager {
   private async createNewConversation(): Promise<string> {
     const { data, error } = await supabase
       .from('conversations')
-      .insert([{}])
+      .insert({})
       .select()
       .single();
 
-    if (error) {
-      console.error('Error creating conversation:', error);
-      throw new Error('Failed to create conversation');
-    }
-
+    if (error) throw error;
+    this.conversationId = data.id;
     return data.id;
+  }
+
+  /**
+   * Updates the conversation context based on current messages
+   */
+  private async updateContext() {
+    try {
+      // Only summarize if we have enough messages
+      if (this.messages.value.length < 3) {
+        return;
+      }
+
+      // Combine all message content for summarization
+      const conversationText = this.messages.value
+        .filter(m => m.role !== 'system')
+        .map(m => m.content)
+        .join('\n\n');
+
+      // Generate summary
+      const { summary, keyTerms } = await this.summarizationService.summarize(
+        conversationText
+      );
+
+      this.context.value = {
+        summary,
+        keyTerms,
+        tags: keyTerms,
+        raw_conversation: conversationText
+      };
+
+      // Save context to Supabase if needed
+      if (this.conversationId) {
+        const { error } = await supabase.from('conversation_contexts').upsert({
+          conversation_id: this.conversationId,
+          summary,
+          key_terms: keyTerms,
+          tags: keyTerms,
+          raw_conversation: conversationText
+        });
+
+        if (error) {
+          console.error('Error saving context:', error);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating context:', error);
+    }
   }
 
   /**
@@ -71,37 +124,31 @@ export class ConversationManager {
    * @returns The AI's response text
    */
   async sendMessage(content: string): Promise<void> {
+    if (!this.conversationId) {
+      await this.createNewConversation();
+    }
+
+    // Add user message
+    const userMessage: Message = { role: 'user', content };
+    this.messages.value.push(userMessage);
+
     try {
-      if (!this.conversationId) {
-        this.conversationId = await this.createNewConversation();
-      }
-
-      // Add user message to local state
-      const userMessage: Message = { role: 'user', content };
-      this.messages.value.push(userMessage);
-
-      // Save user message to Supabase
-      const { error: msgError } = await supabase.from('messages').insert([
-        {
-          conversation_id: this.conversationId,
-          role: 'user',
-          content
-        }
-      ]);
-
-      if (msgError) {
-        console.error('Error saving user message:', msgError);
-      }
+      // Save user message
+      await supabase.from('messages').insert({
+        conversation_id: this.conversationId,
+        role: 'user',
+        content
+      });
 
       // Get AI response
-      const response = await fetch('http://localhost:3000/api/chat', {
+      const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [this.systemMessage, ...this.messages.value],
-          conversationId: this.conversationId
+          messages: [
+            { role: 'system', content: this.systemMessage },
+            ...this.messages.value
+          ]
         })
       });
 
@@ -117,6 +164,22 @@ export class ConversationManager {
         content: assistantMessage
       };
       this.messages.value.push(assistantMessageObj);
+
+      // Save AI message to Supabase
+      const { error: aiMsgError } = await supabase.from('messages').insert([
+        {
+          conversation_id: this.conversationId,
+          role: assistantMessageObj.role,
+          content: assistantMessageObj.content
+        }
+      ]);
+
+      if (aiMsgError) {
+        console.error('Error saving AI message:', aiMsgError);
+      }
+
+      // Update context after new messages
+      await this.updateContext();
     } catch (error) {
       console.error('Error in sendMessage:', error);
       throw error;
@@ -129,5 +192,47 @@ export class ConversationManager {
    */
   getCurrentMessages(): Message[] {
     return this.messages.value;
+  }
+
+  getContext(): ConversationContext {
+    return this.context.value;
+  }
+
+  async searchByTags(tags: string[]): Promise<any[]> {
+    try {
+      const { data, error } = await supabase.rpc(
+        'search_conversations_by_tags',
+        { search_tags: tags }
+      );
+
+      if (error) throw error;
+      return data || [];
+    } catch (error) {
+      console.error('Error searching by tags:', error);
+      return [];
+    }
+  }
+
+  async injectContext(conversationId: string): Promise<void> {
+    try {
+      // Get the context of the selected conversation
+      const { data: contextData, error: contextError } = await supabase
+        .from('conversation_contexts')
+        .select('summary, raw_conversation')
+        .eq('conversation_id', conversationId)
+        .single();
+
+      if (contextError) throw contextError;
+
+      // Add the context as a system message
+      if (contextData?.summary) {
+        this.messages.value.push({
+          role: 'system',
+          content: `Additional context from a related conversation:\n${contextData.summary}`
+        });
+      }
+    } catch (error) {
+      console.error('Error injecting context:', error);
+    }
   }
 }
