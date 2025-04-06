@@ -128,7 +128,7 @@ onMounted(() => {
   <div class="app-container" :class="{ dark: isDark }">
     <!-- Header -->
     <header class="header">
-      <button class="menu-button" @click="toggleSidebar">
+      <button class="menu-button md:hidden" @click="toggleSidebar">
         <svg
           xmlns="http://www.w3.org/2000/svg"
           width="24"
@@ -148,9 +148,9 @@ onMounted(() => {
       <h1 class="header-title">AI Chat</h1>
       <div class="header-actions">
         <button class="theme-toggle" @click="toggleDark()">
-          {{ isDark ? '🌙' : '☀️' }}
+          {{ !isDark ? '🌙' : '☀️' }}
         </button>
-        <button class="action-button">
+        <button class="settings-button" title="Settings">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="20"
@@ -397,7 +397,6 @@ onMounted(() => {
 }
 
 .menu-button:hover {
-  background: var(--bg-main);
   color: var(--text-primary);
 }
 
@@ -410,6 +409,20 @@ onMounted(() => {
 
 .header-actions {
   margin-left: auto;
+}
+
+.settings-button {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  padding: 0.5rem;
+  border-radius: 0.375rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.settings-button:hover {
+  color: var(--text-primary);
 }
 
 /* Main content */
@@ -698,6 +711,12 @@ onMounted(() => {
 
   .input-container {
     margin: 0 0.5rem 0.5rem;
+  }
+}
+
+@media (min-width: 768px) {
+  .md\:hidden {
+    display: none;
   }
 }
 
