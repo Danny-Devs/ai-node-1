@@ -332,10 +332,10 @@ onMounted(() => {
 
 .message.assistant {
   float: left;
-  background: white;
-  color: #1f2937;
-  border: 1px solid #e5e7eb;
+  background: #7c3aed;
+  color: white;
   border-bottom-left-radius: 0.25rem;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }
 
 .message-content {
