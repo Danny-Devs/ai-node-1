@@ -119,16 +119,37 @@ const sampleData = {
 app.post('/api/chat', async (req, res) => {
   try {
     const { messages } = req.body;
+    console.log('Received messages:', messages);
+
+    // Add system message if not present
+    const systemMessage = {
+      role: 'system',
+      content:
+        'You are a helpful AI assistant that provides clear, accurate, and engaging responses.'
+    };
+
+    const allMessages =
+      messages[0]?.role === 'system' ? messages : [systemMessage, ...messages];
+    console.log('Sending to OpenAI:', allMessages);
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-3.5-turbo',
-      messages: messages
+      model: 'gpt-4',
+      messages: allMessages
     });
 
-    res.json({ message: completion.choices[0].message.content });
+    const responseMessage = completion.choices[0].message;
+    console.log('OpenAI response:', responseMessage);
+
+    res.json({
+      message: responseMessage.content,
+      role: responseMessage.role
+    });
   } catch (error) {
     console.error('Error in chat endpoint:', error);
-    res.status(500).json({ error: 'Failed to get AI response' });
+    res.status(500).json({
+      error: 'Failed to get AI response',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    });
   }
 });
 

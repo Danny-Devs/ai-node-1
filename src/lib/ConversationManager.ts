@@ -33,7 +33,7 @@ export interface Message {
   created_at?: string;
 }
 
-interface ConversationContext {
+export interface ConversationContext {
   summary: string;
   keyTerms: string[];
   tags: string[];
@@ -47,31 +47,35 @@ export interface ApiError extends Error {
 
 export class ConversationManager {
   private messages = ref<Message[]>([]);
-  private context = ref<ConversationContext>({
+  private context: ConversationContext = {
     summary: '',
     keyTerms: [],
-    tags: []
-  });
+    tags: [],
+    raw_conversation: ''
+  };
   private conversationId: string | null = null;
   private summarizationService: SummarizationService;
-  private systemMessage = 'You are a helpful AI assistant.';
+  private systemMessage =
+    'You are a helpful AI assistant that provides clear, accurate, and engaging responses.';
   private loading = ref(false);
-  private error = ref<ApiError | null>(null);
+  private error: ApiError | null = null;
 
   constructor() {
     this.summarizationService = new SummarizationService();
+    // Add system message at initialization
+    this.messages.value.push({ role: 'system', content: this.systemMessage });
   }
 
   private setError(message: string, status?: number, details?: any) {
     const error = new Error(message) as ApiError;
     error.status = status;
     error.details = details;
-    this.error.value = error;
+    this.error = error;
     console.error('ConversationManager error:', error);
   }
 
   private clearError() {
-    this.error.value = null;
+    this.error = null;
   }
 
   /**
@@ -116,7 +120,7 @@ export class ConversationManager {
         conversationText
       );
 
-      this.context.value = {
+      this.context = {
         summary,
         keyTerms,
         tags: keyTerms,
@@ -149,65 +153,50 @@ export class ConversationManager {
    * @returns The AI's response text
    */
   async sendMessage(content: string): Promise<void> {
-    this.clearError();
     this.loading.value = true;
+    this.clearError();
+    console.log('Sending message:', content);
+    console.log('Current messages before:', this.messages.value);
 
     try {
-      if (!this.conversationId) {
-        await this.createNewConversation();
-      }
+      // Add user message immediately
+      this.messages.value.push({ role: 'user', content });
+      console.log('Messages after user message:', this.messages.value);
 
-      // Add user message
-      const userMessage: Message = { role: 'user', content };
-      this.messages.value.push(userMessage);
-
-      // Save user message
-      const { error: msgError } = await supabase.from('messages').insert({
-        conversation_id: this.conversationId,
-        role: 'user',
-        content
-      });
-
-      if (msgError) throw msgError;
-
-      // Get AI response
+      // Send to API
       const response = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
         body: JSON.stringify({
-          messages: [
-            { role: 'system', content: this.systemMessage },
-            ...this.messages.value
-          ]
+          messages: this.messages.value
         })
       });
 
       if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to get response from API');
       }
 
       const data = await response.json();
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: data.message
-      };
+      console.log('API response:', data);
 
-      this.messages.value.push(assistantMessage);
+      if (!data.message) {
+        throw new Error('Invalid response from API');
+      }
 
-      // Save assistant message
-      const { error: aiMsgError } = await supabase.from('messages').insert({
-        conversation_id: this.conversationId,
+      // Add assistant's response
+      this.messages.value.push({
         role: 'assistant',
         content: data.message
       });
-
-      if (aiMsgError) throw aiMsgError;
-
-      // Update context after new messages
-      await this.updateContext();
-    } catch (error) {
-      this.setError('Failed to send message', 500, error);
-      throw error;
+      console.log('Final messages:', this.messages.value);
+    } catch (err) {
+      console.error('Error sending message:', err);
+      this.setError(
+        err instanceof Error ? err.message : 'Failed to send message'
+      );
     } finally {
       this.loading.value = false;
     }
@@ -222,7 +211,7 @@ export class ConversationManager {
   }
 
   getContext(): ConversationContext {
-    return this.context.value;
+    return this.context;
   }
 
   async searchByTags(tags: string[]): Promise<any[]> {
@@ -271,6 +260,6 @@ export class ConversationManager {
   }
 
   getError(): ApiError | null {
-    return this.error.value;
+    return this.error;
   }
 }

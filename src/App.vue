@@ -43,7 +43,11 @@ interface UIState {
 
 // Chat state
 const conversationManager = new ConversationManager();
-const messages = computed(() => conversationManager.getCurrentMessages());
+const messages = computed(() => {
+  const msgs = conversationManager.getCurrentMessages();
+  console.log('Computing messages:', msgs);
+  return msgs.filter(msg => msg.role !== 'system');
+});
 const isLoading = computed(() => conversationManager.isLoading());
 const error = computed(() => conversationManager.getError());
 const context = computed(() => ({
@@ -284,20 +288,16 @@ onMounted(() => {
           <!-- Messages -->
           <div class="messages" ref="messagesContainer">
             <div
-              v-for="(message, index) in messages"
-              :key="index"
+              v-for="message in messages"
+              :key="message.content"
               class="message"
               :class="message.role"
             >
               {{ message.content }}
             </div>
-
-            <!-- Loading indicator -->
             <div v-if="isLoading" class="message assistant loading">
               <div class="typing-indicator">
-                <span></span>
-                <span></span>
-                <span></span>
+                <span></span><span></span><span></span>
               </div>
             </div>
           </div>
@@ -348,31 +348,35 @@ onMounted(() => {
 
 <style scoped>
 /* Base reset and theme variables */
-:root {
-  /* Light theme */
-  --bg-main: #f8fafc;
-  --bg-white: #ffffff;
-  --bg-sidebar: #f1f5f9;
-  --text-primary: #0f172a;
-  --text-secondary: #1e293b;
-  --text-muted: #475569;
-  --text-on-primary: #ffffff;
-  --border-color: #e2e8f0;
-  --shadow-color: rgba(51, 65, 85, 0.08);
-  --primary: #0ea5e9;
-  --primary-dark: #0284c7;
+.app-container {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-main);
+  color: var(--text-primary);
+  overflow: hidden;
 }
 
-.dark {
+.app-container.dark {
   --bg-main: #1a1b1e;
   --bg-white: #2c2e33;
   --bg-sidebar: #25262b;
+  --bg-message-user: #3b82f6;
+  --bg-message-assistant: #2c2e33;
+  --bg-message-system: #4b5563;
   --text-primary: #e5e7eb;
   --text-secondary: #d1d5db;
   --text-muted: #9ca3af;
   --text-on-primary: #ffffff;
   --border-color: #374151;
   --shadow-color: rgba(0, 0, 0, 0.2);
+  --input-bg: #1f2937;
+  --input-border: #4b5563;
+  --tag-bg: #374151;
+  --tag-text: #d1d5db;
+  --tag-bg-selected: #3b82f6;
+  --tag-text-selected: #ffffff;
   --primary: #3b82f6;
   --primary-dark: #2563eb;
 }
@@ -385,16 +389,6 @@ onMounted(() => {
 }
 
 /* Layout */
-.app-container {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--bg-main);
-  color: var(--text-primary);
-  overflow: hidden;
-}
-
 .main-container {
   flex: 1;
   display: flex;
@@ -499,7 +493,7 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  overflow: hidden;
+  background: #f9fafb;
 }
 
 .chat-container {
@@ -507,64 +501,64 @@ onMounted(() => {
   display: flex;
   flex-direction: column;
   width: 100%;
-  height: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1rem;
+  height: calc(100vh - 60px);
   overflow: hidden;
-  padding: 1.5rem;
 }
 
 /* Messages */
 .messages {
   flex: 1;
   overflow-y: auto;
-  padding-right: 1rem;
+  padding: 1rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .message {
-  display: inline-block;
-  max-width: 85%;
   padding: 0.75rem 1rem;
-  margin: 0.5rem 0;
-  border-radius: 1rem;
-  clear: both;
-  line-height: 1.5;
-  font-size: 0.95rem;
+  margin-bottom: 1rem;
+  border-radius: 8px;
+  max-width: 80%;
+  word-break: break-word;
 }
 
 .message.user {
-  float: right;
-  background: var(--primary);
-  color: var(--text-on-primary);
-  border-bottom-right-radius: 0.25rem;
+  margin-left: auto;
+  background: #2563eb;
+  color: white;
 }
 
 .message.assistant {
-  float: left;
-  background: var(--bg-white);
-  color: var(--text-primary);
-  border: 1px solid var(--border-color);
-  border-bottom-left-radius: 0.25rem;
+  margin-right: auto;
+  background: #f3f4f6;
+  color: black;
+  min-width: 120px;
 }
 
 .message.system {
-  float: left;
-  background: var(--text-muted);
-  color: var(--text-on-primary);
-  border-radius: 0.5rem;
-  font-style: italic;
-  font-size: 0.875rem;
-  max-width: 100%;
-  margin: 1rem 0;
+  display: none;
+}
+
+.message.assistant.loading {
+  padding: 0.75rem;
+  min-width: 120px;
+  display: flex;
+  justify-content: center;
 }
 
 /* Input area */
 .input-container {
   margin-top: 1rem;
   padding: 1rem;
-  background: var(--bg-white);
-  border-radius: 1rem;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   display: flex;
-  gap: 0.75rem;
-  box-shadow: 0 2px 4px var(--shadow-color);
+  gap: 1rem;
 }
 
 .message-input {
@@ -633,15 +627,14 @@ onMounted(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 0.5rem;
 }
 
 .tag {
-  background: var(--bg-main);
-  color: var(--text-secondary);
-  padding: 0.375rem 0.75rem;
+  background: var(--tag-bg);
+  color: var(--tag-text);
+  padding: 0.25rem 0.75rem;
   border-radius: 1rem;
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -653,50 +646,8 @@ onMounted(() => {
 }
 
 .tag.selected {
-  background: var(--primary);
-  color: var(--text-on-primary);
-}
-
-/* Loading indicator */
-.message.loading {
-  background: var(--bg-main);
-  min-height: 2.5rem;
-  display: flex;
-  align-items: center;
-  padding: 0.75rem 1rem;
-}
-
-.typing-indicator {
-  display: flex;
-  gap: 0.25rem;
-  padding: 0.5rem;
-}
-
-.typing-indicator span {
-  width: 0.5rem;
-  height: 0.5rem;
-  background: var(--text-muted);
-  border-radius: 50%;
-  animation: bounce 1.4s infinite ease-in-out;
-}
-
-.typing-indicator span:nth-child(1) {
-  animation-delay: -0.32s;
-}
-
-.typing-indicator span:nth-child(2) {
-  animation-delay: -0.16s;
-}
-
-@keyframes bounce {
-  0%,
-  80%,
-  100% {
-    transform: scale(0);
-  }
-  40% {
-    transform: scale(1);
-  }
+  background: var(--tag-bg-selected);
+  color: var(--tag-text-selected);
 }
 
 /* Modal */
@@ -761,23 +712,25 @@ onMounted(() => {
   padding: 0.25rem;
 }
 
+/* Context summary and key terms */
 .context-summary {
-  background: #f8fafc;
+  background: var(--bg-white);
   border-radius: 0.5rem;
   padding: 1rem;
   margin-bottom: 1rem;
 }
 
-.context-summary h4 {
+.context-summary h4,
+.key-terms h4 {
   font-size: 0.875rem;
   font-weight: 600;
-  color: #475569;
+  color: var(--text-primary);
   margin: 0 0 0.5rem;
 }
 
 .context-summary p {
   font-size: 0.875rem;
-  color: #64748b;
+  color: var(--text-secondary);
   line-height: 1.5;
   margin: 0;
 }
@@ -786,39 +739,7 @@ onMounted(() => {
   margin-bottom: 1rem;
 }
 
-.key-terms h4 {
-  font-size: 0.875rem;
-  font-weight: 600;
-  color: #475569;
-  margin: 0 0 0.5rem;
-}
-
-.tag-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-}
-
-.tag {
-  background: #e2e8f0;
-  color: #475569;
-  padding: 0.25rem 0.75rem;
-  border-radius: 1rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.tag.selected {
-  background: #2563eb;
-  color: white;
-}
-
-.placeholder-text {
-  color: #94a3b8;
-  font-size: 0.875rem;
-  font-style: italic;
-}
-
+/* Related conversations */
 .selected-filters {
   display: flex;
   flex-wrap: wrap;
@@ -827,8 +748,8 @@ onMounted(() => {
 }
 
 .selected-tag {
-  background: #2563eb;
-  color: white;
+  background: var(--primary);
+  color: var(--text-on-primary);
   padding: 0.25rem 0.75rem;
   border-radius: 1rem;
   font-size: 0.75rem;
@@ -852,17 +773,22 @@ onMounted(() => {
 .conversation-header h4 {
   margin: 0;
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--text-secondary);
 }
 
 .inject-button {
-  background: #2563eb;
-  color: white;
+  background: var(--primary);
+  color: var(--text-on-primary);
   border: none;
   padding: 0.25rem 0.75rem;
   border-radius: 0.375rem;
   font-size: 0.75rem;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.inject-button:hover {
+  background: var(--primary-dark);
 }
 
 .conversation-tags {
@@ -873,23 +799,29 @@ onMounted(() => {
 }
 
 .mini-tag {
-  background: #f3f4f6;
-  color: #6b7280;
+  background: var(--tag-bg);
+  color: var(--tag-text);
   padding: 0.125rem 0.5rem;
   border-radius: 0.75rem;
   font-size: 0.75rem;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mini-tag:hover {
+  background: var(--primary);
+  color: var(--text-on-primary);
 }
 
 .mini-tag.selected {
-  background: #2563eb;
-  color: white;
+  background: var(--tag-bg-selected);
+  color: var(--tag-text-selected);
 }
 
 .view-raw {
   background: none;
   border: none;
-  color: #6b7280;
+  color: var(--text-secondary);
   font-size: 0.75rem;
   padding: 0;
   margin-top: 0.5rem;
@@ -897,9 +829,50 @@ onMounted(() => {
   text-decoration: underline;
 }
 
-.no-results {
-  color: #6b7280;
+.view-raw:hover {
+  color: var(--text-primary);
+}
+
+.no-results,
+.placeholder-text {
+  color: var(--text-muted);
   font-size: 0.875rem;
   font-style: italic;
+}
+
+.typing-indicator {
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  justify-content: center;
+  align-items: center;
+  min-height: 24px;
+  min-width: 60px;
+}
+
+.typing-indicator span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #9ca3af;
+  animation: bounce 1.4s infinite ease-in-out;
+}
+
+.typing-indicator span:nth-child(1) {
+  animation-delay: -0.32s;
+}
+.typing-indicator span:nth-child(2) {
+  animation-delay: -0.16s;
+}
+
+@keyframes bounce {
+  0%,
+  80%,
+  100% {
+    transform: scale(0);
+  }
+  40% {
+    transform: scale(1);
+  }
 }
 </style>
