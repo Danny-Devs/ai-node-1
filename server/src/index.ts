@@ -9,7 +9,7 @@
 
 import express from 'express';
 import cors from 'cors';
-import OpenAI from 'openai';
+import { OpenAI } from 'openai';
 import { createClient } from '@supabase/supabase-js';
 
 // Initialize Express with JSON parsing and CORS
@@ -18,18 +18,15 @@ app.use(express.json());
 app.use(cors());
 
 if (!process.env.OPENAI_API_KEY) {
-  throw new Error('OPENAI_API_KEY is required');
+  throw new Error('Missing OpenAI API key');
 }
 
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-  throw new Error('SUPABASE_URL and SUPABASE_SERVICE_KEY are required');
+  throw new Error('Missing Supabase environment variables');
 }
 
 // Initialize API clients
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
+const openai = new OpenAI();
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_KEY
@@ -46,70 +43,41 @@ const supabase = createClient(
  */
 app.post('/api/chat', async (req, res) => {
   try {
-    const { conversation_id, messages } = req.body;
+    const { messages, conversationId } = req.body;
 
-    if (!Array.isArray(messages)) {
-      return res.status(400).json({ error: 'Messages must be an array' });
+    if (!messages || !Array.isArray(messages)) {
+      return res.status(400).json({ error: 'Invalid messages format' });
     }
 
-    if (!conversation_id) {
-      return res.status(400).json({ error: 'conversation_id is required' });
-    }
+    console.log('Sending to OpenAI:', messages);
 
-    // Format messages for OpenAI
-    const formattedMessages = messages.map(msg => ({
-      role: msg.role,
-      content: msg.content
-    }));
-
-    // Add system message if not present
-    if (!formattedMessages.some(msg => msg.role === 'system')) {
-      formattedMessages.unshift({
-        role: 'system',
-        content:
-          'You are a helpful AI assistant. Be concise and clear in your responses.'
-      });
-    }
-
-    console.log('Sending to OpenAI:', formattedMessages);
-
-    // Get AI response from OpenAI
     const completion = await openai.chat.completions.create({
       model: 'gpt-4',
-      messages: formattedMessages,
-      temperature: 0.7,
-      max_tokens: 1000
+      messages: messages
     });
 
-    const aiResponse = completion.choices[0].message.content;
-    if (!aiResponse) {
-      throw new Error('No response from AI');
-    }
-
-    console.log('Got response from OpenAI:', aiResponse);
+    const assistantMessage = completion.choices[0].message.content;
+    console.log('Got response from OpenAI:', assistantMessage);
 
     // Save assistant message to Supabase
-    const { error: assistantError } = await supabase.from('messages').insert({
-      conversation_id,
-      role: 'assistant',
-      content: aiResponse
-    });
+    if (conversationId) {
+      const { error: msgError } = await supabase.from('messages').insert([
+        {
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: assistantMessage
+        }
+      ]);
 
-    if (assistantError) {
-      console.error('Error inserting assistant message:', assistantError);
-      return res
-        .status(500)
-        .json({ error: 'Failed to save message to database' });
+      if (msgError) {
+        console.error('Error saving assistant message:', msgError);
+      }
     }
 
-    res.json({ content: aiResponse });
+    res.json({ message: assistantMessage });
   } catch (error) {
     console.error('Error in chat endpoint:', error);
-    if (error instanceof Error) {
-      res.status(500).json({ error: error.message });
-    } else {
-      res.status(500).json({ error: 'An unexpected error occurred' });
-    }
+    res.status(500).json({ error: 'Failed to process chat message' });
   }
 });
 

@@ -1,3 +1,6 @@
+<!-- TODO: 
+- extract UI sections into separate components
+- add user authentication -->
 <!--
   App.vue - Main chat interface component
   
@@ -12,14 +15,22 @@
 import { ref, onMounted, nextTick } from 'vue';
 import { ConversationManager } from './lib/ConversationManager';
 
-const messages = ref<{ id: string; role: string; content: string }[]>([]);
-const newMessage = ref('');
 const messagesContainer = ref<HTMLElement | null>(null);
+const messageInput = ref<HTMLInputElement | null>(null);
+const newMessage = ref('');
 const isLoading = ref(false);
 const sidebarOpen = ref(true);
 const conversationManager = new ConversationManager();
 
+interface Message {
+  role: string;
+  content: string;
+}
+
+const messages = ref<Message[]>([]);
+
 const scrollToBottom = async () => {
+  // Wait for the next tick to ensure the DOM is updated
   await nextTick();
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
@@ -31,43 +42,24 @@ const toggleSidebar = () => {
 };
 
 const sendMessage = async () => {
-  const content = newMessage.value.trim();
-  if (!content || isLoading.value) return;
+  if (!newMessage.value.trim()) return;
 
-  // Add user message
-  messages.value.push({
-    id: crypto.randomUUID(),
-    role: 'user',
-    content
-  });
+  const userMessage = newMessage.value;
   newMessage.value = '';
-  await scrollToBottom();
 
   try {
-    isLoading.value = true;
-    // Get AI response
-    const response = await conversationManager.sendMessage(content);
-    messages.value.push({
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: response
-    });
+    await conversationManager.sendMessage(userMessage);
+    messages.value = conversationManager.getCurrentMessages();
     await scrollToBottom();
+    messageInput.value?.focus();
   } catch (error) {
-    console.error('Error getting AI response:', error);
-    messages.value.push({
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: 'Sorry, I encountered an error. Please try again.'
-    });
-    await scrollToBottom();
-  } finally {
-    isLoading.value = false;
+    console.error('Error sending message:', error);
+    // You could add error handling UI here
   }
 };
 
 onMounted(() => {
-  scrollToBottom();
+  messageInput.value?.focus();
 });
 </script>
 
@@ -119,13 +111,27 @@ onMounted(() => {
       <!-- Sidebar -->
       <aside class="sidebar" :class="{ 'sidebar-open': sidebarOpen }">
         <div class="sidebar-header">
-          <h2>Conversations</h2>
+          <h2>Current Chat</h2>
         </div>
-        <div class="conversation-list">
-          <div class="conversation active">
-            <span class="conversation-title">Current Chat</span>
-          </div>
-          <!-- Add more conversations here -->
+        <div class="memory-sections">
+          <section class="memory-section">
+            <h3>Short-term Memory</h3>
+            <div class="memory-items">
+              <!-- Placeholder for short-term memory items -->
+            </div>
+          </section>
+          <section class="memory-section">
+            <h3>Mid-term Memory</h3>
+            <div class="memory-items">
+              <!-- Placeholder for mid-term memory items -->
+            </div>
+          </section>
+          <section class="memory-section">
+            <h3>Long-term Memory</h3>
+            <div class="memory-items">
+              <!-- Placeholder for long-term memory items -->
+            </div>
+          </section>
         </div>
       </aside>
 
@@ -135,8 +141,8 @@ onMounted(() => {
           <!-- Message display area with auto-scroll -->
           <div class="messages" ref="messagesContainer">
             <div
-              v-for="message in messages"
-              :key="message.id"
+              v-for="(message, index) in messages"
+              :key="index"
               class="message-wrapper"
             >
               <div :class="['message', message.role]">
@@ -146,27 +152,15 @@ onMounted(() => {
           </div>
 
           <!-- Message input form -->
-          <div class="input-wrapper">
-            <div class="input-container">
-              <input
-                v-model="newMessage"
-                class="message-input"
-                type="text"
-                placeholder="Type your message..."
-                @keyup.enter="sendMessage"
-                :disabled="isLoading"
-              />
-              <button
-                class="send-button"
-                @click="sendMessage"
-                :disabled="isLoading || !newMessage.trim()"
-              >
-                <span v-if="!isLoading">Send</span>
-                <span v-else class="loading-dots">
-                  <span>.</span><span>.</span><span>.</span>
-                </span>
-              </button>
-            </div>
+          <div class="input-container">
+            <input
+              ref="messageInput"
+              v-model="newMessage"
+              @keyup.enter="sendMessage"
+              placeholder="Type your message..."
+              class="message-input"
+            />
+            <button @click="sendMessage" class="send-button">Send</button>
           </div>
         </div>
       </main>
@@ -264,26 +258,26 @@ onMounted(() => {
   color: #374151;
 }
 
-.conversation-list {
+.memory-sections {
+  flex: 1;
+  overflow-y: auto;
   padding: 1rem;
 }
 
-.conversation {
-  padding: 0.75rem 1rem;
-  border-radius: 0.5rem;
-  cursor: pointer;
-  transition: all 0.2s;
+.memory-section {
+  margin-bottom: 2rem;
 }
 
-.conversation:hover {
-  background: #f3f4f6;
+.memory-section h3 {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #6b7280;
+  margin: 0 0 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
-.conversation.active {
-  background: #e5e7eb;
-}
-
-.conversation-title {
+.memory-items {
   font-size: 0.875rem;
   color: #374151;
 }
@@ -317,17 +311,16 @@ onMounted(() => {
 
 .message-wrapper {
   margin: 1rem 0;
+  clear: both;
 }
 
 .message {
   display: inline-block;
   max-width: 85%;
-  border-radius: 1rem;
   padding: 0.75rem 1rem;
   line-height: 1.5;
-  position: relative;
   font-size: 0.95rem;
-  transition: all 0.2s ease;
+  border-radius: 1rem;
 }
 
 .message.user {
@@ -350,40 +343,27 @@ onMounted(() => {
   word-wrap: break-word;
 }
 
-.input-wrapper {
+.input-container {
+  display: flex;
+  gap: 0.75rem;
   padding: 1rem 0 2rem;
   margin-top: auto;
   background: linear-gradient(180deg, rgba(249, 250, 251, 0) 0%, #f9fafb 20%);
 }
 
-.input-container {
-  background: white;
-  border: 1px solid #e5e7eb;
-  border-radius: 1rem;
-  padding: 0.5rem;
-  display: flex;
-  gap: 0.5rem;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  transition: all 0.2s ease;
-}
-
-.input-container:focus-within {
-  border-color: #2563eb;
-  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
-}
-
 .message-input {
   flex: 1;
   padding: 0.75rem 1rem;
-  border: none;
-  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 1rem;
   font-size: 0.95rem;
   color: #1f2937;
   outline: none;
 }
 
-.message-input::placeholder {
-  color: #9ca3af;
+.message-input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.1);
 }
 
 .send-button {
@@ -395,51 +375,10 @@ onMounted(() => {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 5rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
 }
 
-.send-button:not(:disabled):hover {
-  background: #1d4ed8;
-}
-
-.send-button:disabled {
-  background: #93c5fd;
-  cursor: not-allowed;
-}
-
-.loading-dots {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-}
-
-.loading-dots span {
-  animation: loading 1.4s infinite;
-  display: inline-block;
-}
-
-.loading-dots span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.loading-dots span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes loading {
-  0%,
-  100% {
-    opacity: 0.3;
-    transform: translateY(0);
-  }
-  50% {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
+.send-button:hover {
+  background: #3b82f6;
 }
 
 /* Custom scrollbar */
@@ -458,13 +397,6 @@ onMounted(() => {
 
 .messages::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
-}
-
-/* Clear floats after messages */
-.message-wrapper::after {
-  content: '';
-  display: table;
-  clear: both;
 }
 
 @media (max-width: 768px) {

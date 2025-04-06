@@ -9,20 +9,21 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import { ref } from 'vue';
 
 // Environment variables are declared in src/env.d.ts
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-if (!supabaseUrl || !supabaseAnonKey) {
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   throw new Error('Missing Supabase environment variables');
 }
 
-const supabase = createClient(supabaseUrl, supabaseAnonKey);
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 /** Allowed message roles in the chat */
-type MessageRole = 'user' | 'assistant' | 'system';
+export type MessageRole = 'system' | 'user' | 'assistant';
 
 /** Structure of a chat message */
 interface Message {
@@ -31,36 +32,36 @@ interface Message {
 }
 
 export class ConversationManager {
-  private currentConversationId: string | null = null;
-  private messages: Message[] = [];
+  private messages = ref<Message[]>([]);
+  private systemMessage: Message = {
+    role: 'system',
+    content:
+      'You are a helpful AI assistant. Be concise and clear in your responses.'
+  };
+  private conversationId: string | null = null;
 
   constructor() {
-    this.createNewConversation().catch(error => {
-      console.error('Failed to create conversation:', error);
-    });
+    // Initialize with empty messages array
+    this.messages.value = [];
   }
 
   /**
    * Creates a new conversation in Supabase
    * Called automatically on initialization
    */
-  private async createNewConversation() {
-    try {
-      const { data, error } = await supabase
-        .from('conversations')
-        .insert({})
-        .select()
-        .single();
+  private async createNewConversation(): Promise<string> {
+    const { data, error } = await supabase
+      .from('conversations')
+      .insert([{}])
+      .select()
+      .single();
 
-      if (error) throw error;
-      if (!data) throw new Error('No data returned from conversation creation');
-
-      this.currentConversationId = data.id;
-      console.log('Created new conversation:', this.currentConversationId);
-    } catch (error) {
+    if (error) {
       console.error('Error creating conversation:', error);
-      throw new Error('Failed to create new conversation. Please try again.');
+      throw new Error('Failed to create conversation');
     }
+
+    return data.id;
   }
 
   /**
@@ -69,63 +70,56 @@ export class ConversationManager {
    * @param content - The message text to send
    * @returns The AI's response text
    */
-  async sendMessage(content: string): Promise<string> {
+  async sendMessage(content: string): Promise<void> {
     try {
-      if (!this.currentConversationId) {
-        await this.createNewConversation();
+      if (!this.conversationId) {
+        this.conversationId = await this.createNewConversation();
       }
 
-      // Add user message to memory and database
+      // Add user message to local state
       const userMessage: Message = { role: 'user', content };
-      this.messages.push(userMessage);
+      this.messages.value.push(userMessage);
 
-      const { error: insertError } = await supabase.from('messages').insert({
-        conversation_id: this.currentConversationId,
-        role: 'user',
-        content
-      });
+      // Save user message to Supabase
+      const { error: msgError } = await supabase.from('messages').insert([
+        {
+          conversation_id: this.conversationId,
+          role: 'user',
+          content
+        }
+      ]);
 
-      if (insertError) {
-        console.error('Error saving user message:', insertError);
-        throw new Error('Failed to save message');
+      if (msgError) {
+        console.error('Error saving user message:', msgError);
       }
 
-      // Send request to backend
-      const response = await fetch(`${API_URL}/api/chat`, {
+      // Get AI response
+      const response = await fetch('http://localhost:3000/api/chat', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          conversation_id: this.currentConversationId,
-          messages: this.messages
+          messages: [this.systemMessage, ...this.messages.value],
+          conversationId: this.conversationId
         })
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || 'Failed to get AI response');
+        throw new Error('Failed to get AI response');
       }
 
-      const data = await response.json();
+      const { message: assistantMessage } = await response.json();
 
-      if (!data.content) {
-        throw new Error('Invalid response from AI service');
-      }
-
-      const assistantMessage: Message = {
+      // Add assistant message to local state
+      const assistantMessageObj: Message = {
         role: 'assistant',
-        content: data.content
+        content: assistantMessage
       };
-      this.messages.push(assistantMessage);
-
-      return data.content;
+      this.messages.value.push(assistantMessageObj);
     } catch (error) {
       console.error('Error in sendMessage:', error);
-      if (error instanceof Error) {
-        throw new Error(`Failed to process message: ${error.message}`);
-      }
-      throw new Error('An unexpected error occurred. Please try again.');
+      throw error;
     }
   }
 
@@ -133,7 +127,7 @@ export class ConversationManager {
    * Gets all messages in the current conversation
    * @returns Array of messages
    */
-  async getCurrentMessages(): Promise<Message[]> {
-    return this.messages;
+  getCurrentMessages(): Message[] {
+    return this.messages.value;
   }
 }
